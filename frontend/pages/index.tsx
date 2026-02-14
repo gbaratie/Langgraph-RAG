@@ -2,8 +2,64 @@ import Typography from '@mui/material/Typography';
 import Box from '@mui/material/Box';
 import Alert from '@mui/material/Alert';
 import Paper from '@mui/material/Paper';
+import Button from '@mui/material/Button';
+import Grid from '@mui/material/Grid';
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import {
+  Description as ImportIcon,
+  ViewModule as ChunksIcon,
+  Chat as ChatIcon,
+  Settings as SettingsIcon,
+} from '@mui/icons-material';
 import { healthCheck } from '@/lib/api';
+
+const conceptCards: { title: string; subtitle?: string; body: string }[] = [
+  {
+    title: 'RAG (Retrieval-Augmented Generation)',
+    body: "Le cœur du projet : vous importez des documents, le système les découpe en morceaux (chunks), les vectorise et les stocke. Lors d'une question, les passages pertinents sont récupérés puis un LLM génère une réponse à partir de ce contexte. Cela permet d'interroger vos propres documents (PDF, texte) via un assistant conversationnel.",
+  },
+  {
+    title: 'LangGraph',
+    subtitle: 'Orchestration du flux',
+    body: "Framework pour construire des graphes de flux avec des modèles de langage. Le graphe RAG enchaîne deux nœuds : retrieval (récupération des chunks pertinents, par similarité sémantique ou mots-clés) puis generate (génération de la réponse par le LLM). L'architecture reste claire et évolutive.",
+  },
+  {
+    title: 'Docling',
+    subtitle: 'Conversion de documents',
+    body: "Bibliothèque d'extraction de contenu à partir de PDF, Word, etc. Elle convertit un fichier binaire en texte structuré (Markdown), ensuite découpé en chunks. Les paramètres Docling (nombre de pages, structure des tableaux, mode TableFormer, etc.) sont configurables dans Paramètres.",
+  },
+  {
+    title: 'Chunks et embeddings',
+    subtitle: 'Découpage et vectorisation',
+    body: "Le texte est découpé avec un RecursiveCharacterTextSplitter (taille, chevauchement et séparateurs configurables). Chaque chunk est vectorisé via OpenAI text-embedding-3-small. Les vecteurs permettent une recherche par similarité sémantique ; sans clé OpenAI, un fallback par mots-clés est utilisé.",
+  },
+  {
+    title: 'Chroma',
+    subtitle: 'Stockage des vecteurs',
+    body: "Base de vecteurs persistante : les embeddings sont stockés dans Chroma (en local dans api/data/chroma ou sur disque monté en prod). L'onglet Chunks affiche une carte 2D (t-SNE) des vecteurs et la liste des chunks par document. Données conservées entre redémarrages.",
+  },
+  {
+    title: 'Retriever',
+    subtitle: 'Récupération des passages',
+    body: "À chaque question, les k chunks les plus pertinents sont récupérés (k configurable dans Paramètres, 1–20). Avec embeddings : recherche par similarité cosinus. Sans : recherche par mots-clés. La méthode utilisée et les scores sont affichés dans le Chat.",
+  },
+  {
+    title: 'Chat et LLM',
+    subtitle: 'Génération des réponses',
+    body: "Le LLM (OpenAI, modèle et température configurables) reçoit la question et le contexte (chunks récupérés). Il produit une réponse naturelle. L'interface affiche les chunks utilisés, dépliables, avec leur score. Sans OPENAI_API_KEY, l'app ingère et récupère le contexte mais ne génère pas de réponse fluide.",
+  },
+  {
+    title: 'Paramètres',
+    subtitle: 'Configuration centralisée',
+    body: "Tout est configurable depuis l'onglet Paramètres : découpage des chunks (taille, chevauchement, séparateurs), options Docling (pages max, tableaux, TableFormer), retriever (nombre k de chunks), chat (modèle OpenAI, température). Stockage dans api/data/settings.json.",
+  },
+  {
+    title: 'Import avec statuts',
+    subtitle: 'Feedback en temps réel',
+    body: "L'import de document utilise un flux SSE (Server-Sent Events) : les étapes s'affichent en direct (conversion Docling, découpage en chunks, enregistrement dans Chroma). En cas d'erreur, le message est remonté immédiatement.",
+  },
+];
 
 export default function Home() {
   const [apiStatus, setApiStatus] = useState<'checking' | 'ok' | 'error'>('checking');
@@ -20,13 +76,12 @@ export default function Home() {
         Bienvenue sur Langgraph-RAG
       </Typography>
       <Typography color="text.secondary" paragraph>
-        Ce projet est une application de <strong>RAG (Retrieval-Augmented Generation)</strong> :
-        vous importez des documents, le système les découpe en morceaux (chunks), puis vous pouvez
-        poser des questions et obtenir des réponses générées à partir de votre corpus.
+        Application de <strong>RAG (Retrieval-Augmented Generation)</strong> : importez des documents (PDF, texte),
+        consultez les chunks et la carte des vecteurs, posez des questions et obtenez des réponses générées à partir de votre corpus.
       </Typography>
 
       {apiStatus === 'checking' && (
-        <Alert severity="info" sx={{ mb: 2 }}>Vérification de l&apos;API en cours...</Alert>
+        <Alert severity="info" sx={{ mb: 2 }}>Vérification de l&apos;API en cours…</Alert>
       )}
       {apiStatus === 'ok' && (
         <Alert severity="success" sx={{ mb: 2 }}>L&apos;API est accessible.</Alert>
@@ -37,42 +92,43 @@ export default function Home() {
         </Alert>
       )}
 
-      <Typography variant="h5" sx={{ mt: 3, mb: 1 }}>À quoi sert ce projet ?</Typography>
-      <Typography color="text.secondary" paragraph>
-        L&apos;objectif est de pouvoir interroger vos propres documents (PDF, texte) via un assistant conversationnel :
-        le moteur récupère les passages pertinents dans vos fichiers, puis un modèle de langage génère une réponse à partir de ce contexte.
-      </Typography>
-
-      <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 2 }}>
-        <Paper variant="outlined" sx={{ p: 2 }}>
-          <Typography variant="h6" color="primary" gutterBottom>Langgraph</Typography>
-          <Typography>
-            <strong>Langgraph</strong> est un framework pour construire des graphes de flux (workflows) avec des modèles de langage.
-            Ici, le graphe RAG enchaîne deux étapes : <em>retrieval</em> (récupération des chunks pertinents dans le corpus)
-            puis <em>generate</em> (génération de la réponse par le LLM). Langgraph permet d&apos;orchestrer ces étapes de façon claire et évolutive.
-          </Typography>
-        </Paper>
-        <Paper variant="outlined" sx={{ p: 2 }}>
-          <Typography variant="h6" color="primary" gutterBottom>Docling</Typography>
-          <Typography>
-            <strong>Docling</strong> est une bibliothèque d&apos;extraction de contenu à partir de documents (PDF, Word, etc.).
-            Elle convertit un fichier binaire en texte structuré (Markdown ou texte brut), que l&apos;on découpe ensuite en paragraphes
-            ou blocs pour constituer les &quot;chunks&quot; utilisés par le RAG. Sans Docling, seuls des fichiers texte simples seraient gérables.
-          </Typography>
-        </Paper>
-        <Paper variant="outlined" sx={{ p: 2 }}>
-          <Typography variant="h6" color="primary" gutterBottom>Le LLM (modèle de langage)</Typography>
-          <Typography>
-            Le <strong>LLM</strong> (Large Language Model, ex. OpenAI GPT) reçoit la question de l&apos;utilisateur et le contexte
-            (les chunks récupérés). Il produit une réponse naturelle en s&apos;appuyant sur ce contexte. Sans clé API OpenAI configurée,
-            l&apos;application peut quand même ingérer des documents et afficher le contexte récupéré, mais pas générer de réponse fluide.
-          </Typography>
-        </Paper>
+      <Typography variant="h5" sx={{ mt: 3, mb: 2 }}>Parcourir l&apos;application</Typography>
+      <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 4 }}>
+        <Button variant="contained" component={Link} href="/import" startIcon={<ImportIcon />}>
+          Import
+        </Button>
+        <Button variant="contained" component={Link} href="/chunks" startIcon={<ChunksIcon />}>
+          Chunks
+        </Button>
+        <Button variant="contained" component={Link} href="/chat" startIcon={<ChatIcon />}>
+          Chat
+        </Button>
+        <Button variant="outlined" component={Link} href="/settings" startIcon={<SettingsIcon />}>
+          Paramètres
+        </Button>
       </Box>
 
-      <Typography variant="body2" color="text.secondary" sx={{ mt: 3 }}>
-        Utilisez l&apos;onglet <strong>Import</strong> pour ajouter des documents, <strong>Chunks</strong> pour les visualiser, et <strong>Chat</strong> pour poser des questions sur votre corpus.
+      <Typography variant="h5" sx={{ mt: 3, mb: 2 }}>Concepts du projet</Typography>
+      <Typography color="text.secondary" paragraph>
+        Les briques techniques et fonctionnelles que vous retrouvez dans ce dépôt.
       </Typography>
+      <Grid container spacing={2}>
+        {conceptCards.map((card) => (
+          <Grid item xs={12} md={6} key={card.title}>
+            <Paper variant="outlined" sx={{ p: 2, height: '100%' }}>
+              <Typography variant="h6" color="primary" gutterBottom>
+                {card.title}
+              </Typography>
+              {card.subtitle && (
+                <Typography variant="subtitle2" color="text.secondary" sx={{ mb: 1 }}>
+                  {card.subtitle}
+                </Typography>
+              )}
+              <Typography variant="body2">{card.body}</Typography>
+            </Paper>
+          </Grid>
+        ))}
+      </Grid>
     </Box>
   );
 }

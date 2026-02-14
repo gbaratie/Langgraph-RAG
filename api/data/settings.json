@@ -17,5 +17,12 @@
     "table_former_mode": "FAST",
     "enable_remote_services": false,
     "artifacts_path": null
+  },
+  "retriever": {
+    "k": 5
+  },
+  "chat": {
+    "model": "gpt-4o-mini",
+    "temperature": 0
   }
 }

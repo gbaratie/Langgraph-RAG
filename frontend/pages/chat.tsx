@@ -8,12 +8,20 @@ import Paper from '@mui/material/Paper';
 import List from '@mui/material/List';
 import ListItem from '@mui/material/ListItem';
 import ListItemText from '@mui/material/ListItemText';
+import Collapse from '@mui/material/Collapse';
+import Chip from '@mui/material/Chip';
+import type { RetrievedChunk } from '@/lib/api';
 import { queryRag } from '@/lib/api';
+
+const PREVIEW_LEN = 120;
 
 export default function ChatPage() {
   const [question, setQuestion] = useState('');
   const [answer, setAnswer] = useState('');
   const [sources, setSources] = useState<string[]>([]);
+  const [retrievedChunks, setRetrievedChunks] = useState<RetrievedChunk[]>([]);
+  const [retrievalMethod, setRetrievalMethod] = useState<string>('');
+  const [expandedChunk, setExpandedChunk] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -23,10 +31,15 @@ export default function ChatPage() {
     setError(null);
     setAnswer('');
     setSources([]);
+    setRetrievedChunks([]);
+    setRetrievalMethod('');
+    setExpandedChunk(null);
     try {
       const res = await queryRag(question);
       setAnswer(res.answer);
       setSources(res.sources || []);
+      setRetrievedChunks(res.retrieved_chunks || []);
+      setRetrievalMethod(res.retrieval_method || '');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur lors de la requête');
     } finally {
@@ -73,17 +86,58 @@ export default function ChatPage() {
           <Typography component="div" sx={{ whiteSpace: 'pre-wrap' }}>
             {answer}
           </Typography>
-          {sources.length > 0 && (
+
+          {retrievalMethod && (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+              Méthode de récupération :{' '}
+              <Chip
+                size="small"
+                label={retrievalMethod === 'similarity' ? 'Recherche sémantique (similarité)' : 'Recherche par mots-clés'}
+                sx={{ verticalAlign: 'middle' }}
+              />
+            </Typography>
+          )}
+
+          {retrievedChunks.length > 0 && (
             <>
-              <Typography variant="subtitle2" color="text.secondary" sx={{ mt: 2 }}>
-                Sources
+              <Typography variant="subtitle2" color="text.secondary" sx={{ mt: 2, mb: 1 }}>
+                Chunks récupérés ({retrievedChunks.length})
               </Typography>
-              <List dense>
-                {sources.slice(0, 5).map((s, i) => (
-                  <ListItem key={i}>
-                    <ListItemText primary={s.slice(0, 200) + (s.length > 200 ? '…' : '')} />
-                  </ListItem>
-                ))}
+              <List dense disablePadding>
+                {retrievedChunks.map((chunk, i) => {
+                  const isExpanded = expandedChunk === i;
+                  const preview = chunk.text.length <= PREVIEW_LEN ? chunk.text : chunk.text.slice(0, PREVIEW_LEN) + '…';
+                  return (
+                    <ListItem
+                      key={i}
+                      alignItems="flex-start"
+                      sx={{ flexDirection: 'column', alignItems: 'stretch', border: 1, borderColor: 'divider', borderRadius: 1, mb: 1, p: 1 }}
+                    >
+                      <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                        {chunk.score != null && (
+                          <Chip size="small" label={`score: ${chunk.score.toFixed(4)}`} variant="outlined" />
+                        )}
+                        <Button
+                          size="small"
+                          onClick={() => setExpandedChunk(isExpanded ? null : i)}
+                          sx={{ ml: 'auto' }}
+                        >
+                          {isExpanded ? 'Réduire' : 'Voir tout le texte'}
+                        </Button>
+                      </Box>
+                      <ListItemText
+                        primary={isExpanded ? null : preview}
+                        secondary={isExpanded ? null : null}
+                        primaryTypographyProps={{ variant: 'body2', sx: { whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }}
+                      />
+                      <Collapse in={isExpanded}>
+                        <Typography component="pre" variant="body2" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', mt: 1, p: 1, bgcolor: 'action.hover' }}>
+                          {chunk.text || '(vide)'}
+                        </Typography>
+                      </Collapse>
+                    </ListItem>
+                  );
+                })}
               </List>
             </>
           )}

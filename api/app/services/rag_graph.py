@@ -6,6 +6,8 @@ import os
 from typing import Any
 
 from app.services.docling_ingest import get_ingested_chunks
+from app.services.settings_service import get_settings
+from app.services import vector_store
 
 # Langchain/Langgraph optionnels pour éviter erreurs si pas de clé API
 try:
@@ -23,20 +25,35 @@ def _get_llm():
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         return None
-    return ChatOpenAI(model="gpt-4o-mini", temperature=0)
+    settings = get_settings()
+    chat_cfg = settings.get("chat", {})
+    model = chat_cfg.get("model", "gpt-4o-mini")
+    temperature = float(chat_cfg.get("temperature", 0))
+    return ChatOpenAI(model=model, temperature=temperature)
 
 
 def _retrieve(state: dict) -> dict:
-    """Récupère les chunks pertinents (simplifié : tous les chunks ou les N premiers)."""
-    chunks = get_ingested_chunks()
+    """Récupère les chunks pertinents : recherche sémantique (embeddings) ou fallback mot-clé."""
     question = state.get("question", "")
-    # Recherche simple par mot-clé (à remplacer par embeddings + vecteur en prod)
-    if question and chunks:
-        q_lower = question.lower()
-        relevant = [c for c in chunks if any(w in c.lower() for w in q_lower.split() if len(w) > 2)]
-        state["context"] = "\n\n".join(relevant[:5]) if relevant else "\n\n".join(chunks[:5])
+    settings = get_settings()
+    k = int(settings.get("retriever", {}).get("k", 5))
+    k = max(1, min(k, 20))
+    if vector_store.is_available():
+        with_scores = vector_store.similarity_search_with_scores(question, k=k)
+        state["retrieved_chunks"] = with_scores
+        state["retrieval_method"] = "similarity"
+        state["context"] = "\n\n".join(c["text"] for c in with_scores) if with_scores else ""
     else:
-        state["context"] = "\n\n".join(chunks[:10]) if chunks else ""
+        chunks = get_ingested_chunks()
+        if question and chunks:
+            q_lower = question.lower()
+            relevant = [c for c in chunks if any(w in c.lower() for w in q_lower.split() if len(w) > 2)]
+            raw = relevant[:k] if relevant else chunks[:k]
+        else:
+            raw = chunks[:k] if chunks else []
+        state["retrieved_chunks"] = [{"text": t, "score": None} for t in raw]
+        state["retrieval_method"] = "keyword"
+        state["context"] = "\n\n".join(raw) if raw else ""
     return state
 
 
@@ -59,6 +76,7 @@ def _generate(state: dict) -> dict:
         else:
             state["answer"] = f"Contexte disponible ({len(get_ingested_chunks())} chunks). Configurez OPENAI_API_KEY pour des réponses générées."
     state["sources"] = state.get("context", "").split("\n\n")[:3] if state.get("context") else []
+    # retrieved_chunks et retrieval_method déjà remplis par _retrieve
     return state
 
 
@@ -78,12 +96,28 @@ _rag_graph = _build_graph() if _HAS_LANGGRAPH else None
 
 
 async def query_rag(question: str) -> dict[str, Any]:
-    """Exécute le graphe RAG et retourne answer + sources."""
-    state = {"question": question, "context": "", "answer": "", "sources": []}
+    """Exécute le graphe RAG et retourne answer, sources, retrieved_chunks, retrieval_method."""
+    state = {
+        "question": question,
+        "context": "",
+        "answer": "",
+        "sources": [],
+        "retrieved_chunks": [],
+        "retrieval_method": "keyword",
+    }
     if _rag_graph:
         result = _rag_graph.invoke(state)
-        return {"answer": result.get("answer", ""), "sources": result.get("sources", [])}
-    # Sans Langgraph : retrieval + message fixe
+        return {
+            "answer": result.get("answer", ""),
+            "sources": result.get("sources", []),
+            "retrieved_chunks": result.get("retrieved_chunks", []),
+            "retrieval_method": result.get("retrieval_method", "keyword"),
+        }
     _retrieve(state)
     _generate(state)
-    return {"answer": state.get("answer", ""), "sources": state.get("sources", [])}
+    return {
+        "answer": state.get("answer", ""),
+        "sources": state.get("sources", []),
+        "retrieved_chunks": state.get("retrieved_chunks", []),
+        "retrieval_method": state.get("retrieval_method", "keyword"),
+    }

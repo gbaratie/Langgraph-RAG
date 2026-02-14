@@ -1,15 +1,23 @@
 """Routes RAG : ingestion de documents et requêtes."""
+from __future__ import annotations
+
+import json
+from typing import Optional
+
 from fastapi import APIRouter, File, UploadFile, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.services.docling_ingest import (
     ingest_document_with_id,
     ingest_document,
+    ingest_document_stream,
     list_documents,
     get_chunks_by_document_id,
     delete_document,
 )
 from app.services.rag_graph import query_rag
+from app.services import vector_store
 
 router = APIRouter()
 
@@ -18,9 +26,16 @@ class QueryRequest(BaseModel):
     question: str
 
 
+class RetrievedChunk(BaseModel):
+    text: str
+    score: Optional[float] = None
+
+
 class QueryResponse(BaseModel):
     answer: str
     sources: list[str] = []
+    retrieved_chunks: list[RetrievedChunk] = []
+    retrieval_method: str = "keyword"
 
 
 @router.post("/ingest", status_code=201)
@@ -34,6 +49,32 @@ async def ingest(file: UploadFile = File(...)):
         return {"id": doc_id, "filename": file.filename, "chunks": len(chunks)}
     except Exception as e:
         raise HTTPException(422, f"Erreur d'ingestion: {e!s}") from e
+
+
+@router.post("/ingest-stream")
+async def ingest_stream(file: UploadFile = File(...)):
+    """Ingère un document en streamant les statuts (SSE)."""
+    if not file.filename:
+        raise HTTPException(400, "Nom de fichier manquant")
+    content = await file.read()
+
+    async def event_stream():
+        async for event in ingest_document_stream(content, filename=file.filename):
+            yield f"data: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get("/vector-map")
+async def vector_map():
+    """Retourne les points pour la carte 2D des vecteurs (t-SNE)."""
+    available = vector_store.is_available()
+    points = vector_store.get_vector_map_points() if available else []
+    return {"available": available, "points": points}
 
 
 @router.get("/documents")
@@ -81,6 +122,11 @@ async def query(req: QueryRequest):
         raise HTTPException(400, "Question vide")
     try:
         result = await query_rag(req.question)
-        return QueryResponse(answer=result["answer"], sources=result.get("sources", []))
+        return QueryResponse(
+            answer=result["answer"],
+            sources=result.get("sources", []),
+            retrieved_chunks=result.get("retrieved_chunks", []),
+            retrieval_method=result.get("retrieval_method", "keyword"),
+        )
     except Exception as e:
         raise HTTPException(500, f"Erreur RAG: {e!s}") from e

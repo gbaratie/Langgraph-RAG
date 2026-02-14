@@ -5,9 +5,10 @@ Produit des chunks de texte pour le RAG.
 import tempfile
 import uuid
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, AsyncIterator, List, Optional
 
 from app.services.settings_service import get_settings
+from app.services import vector_store
 
 # Docling peut être lourd ; import conditionnel pour éviter erreurs si non installé
 try:
@@ -44,8 +45,16 @@ _documents: List[IngestedDocument] = []
 
 
 def get_ingested_chunks() -> List[str]:
-    """Retourne tous les chunks de tous les documents (pour le retrieval)."""
-    result: List[str] = []
+    """Retourne tous les chunks de tous les documents (pour le retrieval fallback sans embeddings)."""
+    if vector_store.is_available():
+        ids = vector_store.list_document_ids()
+        result: List[str] = []
+        for doc_id, _ in ids:
+            chunks = vector_store.get_chunks_by_doc_id(doc_id)
+            if chunks:
+                result.extend(chunks)
+        return result
+    result = []
     for doc in _documents:
         result.extend(doc.chunks)
     return result
@@ -53,11 +62,19 @@ def get_ingested_chunks() -> List[str]:
 
 def list_documents() -> List[dict]:
     """Retourne la liste des documents ingérés (id, filename, chunk_count)."""
+    if vector_store.is_available():
+        ids = vector_store.list_document_ids()
+        return [
+            {"id": doc_id, "filename": filename, "chunk_count": vector_store.get_chunk_count_by_doc_id(doc_id)}
+            for doc_id, filename in ids
+        ]
     return [d.to_dict() for d in _documents]
 
 
 def get_chunks_by_document_id(doc_id: str) -> Optional[List[str]]:
     """Retourne les chunks d'un document ou None si inconnu."""
+    if vector_store.is_available():
+        return vector_store.get_chunks_by_doc_id(doc_id)
     for doc in _documents:
         if doc.id == doc_id:
             return list(doc.chunks)
@@ -66,6 +83,8 @@ def get_chunks_by_document_id(doc_id: str) -> Optional[List[str]]:
 
 def delete_document(doc_id: str) -> bool:
     """Supprime un document par son id. Retourne True si supprimé."""
+    if vector_store.is_available():
+        return vector_store.delete_by_doc_id(doc_id)
     global _documents
     for i, doc in enumerate(_documents):
         if doc.id == doc_id:
@@ -175,7 +194,10 @@ async def ingest_document(
     # Si doc_id existant (ré-import), supprimer l'ancien document
     delete_document(doc_id)
 
-    _documents.append(IngestedDocument(doc_id=doc_id, filename=filename, chunks=chunks))
+    if vector_store.is_available():
+        vector_store.add_chunks(doc_id, filename, chunks)
+    else:
+        _documents.append(IngestedDocument(doc_id=doc_id, filename=filename, chunks=chunks))
     return doc_id, chunks
 
 
@@ -184,3 +206,29 @@ async def ingest_document_with_id(
 ) -> tuple[str, List[str]]:
     """Ré-ingère un document en remplaçant l'existant (même doc_id)."""
     return await ingest_document(content, filename, doc_id)
+
+
+async def ingest_document_stream(
+    content: bytes, filename: str = "document", doc_id: Optional[str] = None
+) -> AsyncIterator[dict[str, Any]]:
+    """
+    Ingère un document en émettant des statuts intermédiaires (step, message).
+    Yield des dicts avec au moins "step" et "message"; le dernier a "step": "done" et "doc_id", "chunks".
+    """
+    if doc_id is None:
+        doc_id = str(uuid.uuid4())
+    try:
+        yield {"step": "convert", "message": "Conversion du document (Docling)…"}
+        text = await _convert_and_chunk(content, filename)
+        yield {"step": "split", "message": "Découpage en chunks…"}
+        chunks = _split_text(text)
+        yield {"step": "split_done", "message": f"Découpage terminé ({len(chunks)} chunk(s))"}
+        yield {"step": "store", "message": "Enregistrement (Chroma)…" if vector_store.is_available() else "Enregistrement en mémoire…"}
+        delete_document(doc_id)
+        if vector_store.is_available():
+            vector_store.add_chunks(doc_id, filename, chunks)
+        else:
+            _documents.append(IngestedDocument(doc_id=doc_id, filename=filename, chunks=chunks))
+        yield {"step": "done", "message": "Import terminé", "doc_id": doc_id, "chunks": len(chunks)}
+    except Exception as e:
+        yield {"step": "error", "message": str(e)}

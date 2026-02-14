@@ -14,7 +14,7 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import CircularProgress from '@mui/material/CircularProgress';
 import Paper from '@mui/material/Paper';
 import {
-  ingestFile,
+  ingestFileWithProgress,
   listDocuments,
   deleteDocument,
   reingestDocument,
@@ -29,6 +29,8 @@ export default function ImportPage() {
   const [reingestingId, setReingestingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [importStep, setImportStep] = useState<string | null>(null);
+  const [importMessage, setImportMessage] = useState<string>('');
 
   const fetchDocuments = useCallback(async () => {
     setLoading(true);
@@ -47,6 +49,15 @@ export default function ImportPage() {
     fetchDocuments();
   }, [fetchDocuments]);
 
+  const stepLabels: Record<string, string> = {
+    convert: 'Conversion du document',
+    split: 'Découpage en chunks',
+    split_done: 'Découpage terminé',
+    store: 'Enregistrement des vecteurs',
+    done: 'Terminé',
+    error: 'Erreur',
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -54,15 +65,27 @@ export default function ImportPage() {
     setSuccess(null);
     setImporting(true);
     setImportingName(file.name);
+    setImportStep(null);
+    setImportMessage('');
     try {
-      const res = await ingestFile(file);
+      const res = await ingestFileWithProgress(file, (event) => {
+        setImportStep(event.step);
+        setImportMessage(event.message || '');
+      });
       setSuccess(`"${res.filename}" importé : ${res.chunks} chunk(s).`);
+      setImportStep('done');
+      setImportMessage('');
       await fetchDocuments();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erreur lors de l'import");
+      setImportStep('error');
     } finally {
       setImporting(false);
       setImportingName(null);
+      setTimeout(() => {
+        setImportStep(null);
+        setImportMessage('');
+      }, 2000);
       e.target.value = '';
     }
   };
@@ -121,10 +144,17 @@ export default function ImportPage() {
           {importing ? `Import en cours… (${importingName})` : 'Choisir un fichier'}
           <input type="file" hidden accept=".pdf,.txt" onChange={handleFileUpload} />
         </Button>
-        {importing && (
-          <Typography variant="body2" color="text.secondary">
-            Traitement de {importingName}…
-          </Typography>
+        {importing && importStep && (
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+            <Typography variant="body2" color="text.secondary">
+              {importingName} — {stepLabels[importStep] ?? importStep}
+            </Typography>
+            {importMessage && (
+              <Typography variant="caption" color="text.secondary">
+                {importMessage}
+              </Typography>
+            )}
+          </Box>
         )}
       </Box>
 

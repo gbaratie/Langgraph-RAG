@@ -29,8 +29,13 @@ export default function SettingsPage() {
     getSettings()
       .then((s) => {
         if (!cancelled) {
-          setSettings(s);
-          setSeparatorsText(JSON.stringify(s.chunks.separators, null, 2));
+          const full: Settings = {
+            ...s,
+            retriever: s.retriever ?? { k: 5 },
+            chat: s.chat ?? { model: 'gpt-4o-mini', temperature: 0 },
+          };
+          setSettings(full);
+          setSeparatorsText(JSON.stringify(full.chunks.separators, null, 2));
         }
       })
       .catch((e) => {
@@ -65,6 +70,8 @@ export default function SettingsPage() {
           separators,
         },
         docling: settings.docling,
+        retriever: settings.retriever ?? { k: 5 },
+        chat: settings.chat ?? { model: 'gpt-4o-mini', temperature: 0 },
       });
       setSettings(updated);
       setSeparatorsText(JSON.stringify(updated.chunks.separators, null, 2));
@@ -89,6 +96,22 @@ export default function SettingsPage() {
     setSettings({
       ...settings,
       docling: { ...settings.docling, ...patch },
+    });
+  };
+
+  const updateRetriever = (patch: Partial<Settings['retriever']>) => {
+    if (!settings) return;
+    setSettings({
+      ...settings,
+      retriever: { ...(settings.retriever ?? { k: 5 }), ...patch },
+    });
+  };
+
+  const updateChat = (patch: Partial<Settings['chat']>) => {
+    if (!settings) return;
+    setSettings({
+      ...settings,
+      chat: { ...(settings.chat ?? { model: 'gpt-4o-mini', temperature: 0 }), ...patch },
     });
   };
 
@@ -235,6 +258,53 @@ export default function SettingsPage() {
             }
             helperText="Chemin sur le serveur API (ex: ~/.cache/docling/models). Vide = téléchargement automatique."
             size="small"
+          />
+        </Box>
+      </Paper>
+
+      <Paper variant="outlined" sx={{ p: 3, mb: 3 }}>
+        <Typography variant="h6" gutterBottom>
+          Retriever (RAG)
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          Nombre de chunks récupérés pour répondre à chaque question (recherche sémantique ou mots-clés).
+        </Typography>
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, maxWidth: 480 }}>
+          <Typography variant="body2">Nombre de chunks (k) : {settings.retriever.k}</Typography>
+          <Slider
+            value={settings.retriever.k}
+            onChange={(_, v) => updateRetriever({ k: v as number })}
+            min={1}
+            max={20}
+            step={1}
+            valueLabelDisplay="auto"
+          />
+        </Box>
+      </Paper>
+
+      <Paper variant="outlined" sx={{ p: 3, mb: 3 }}>
+        <Typography variant="h6" gutterBottom>
+          Chat (LLM)
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          Modèle OpenAI et température pour la génération des réponses (nécessite OPENAI_API_KEY).
+        </Typography>
+        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, maxWidth: 480 }}>
+          <TextField
+            label="Modèle"
+            value={settings.chat.model}
+            onChange={(e) => updateChat({ model: e.target.value })}
+            helperText="Ex. gpt-4o-mini, gpt-4o, gpt-4-turbo"
+            size="small"
+          />
+          <Typography variant="body2">Température : {settings.chat.temperature}</Typography>
+          <Slider
+            value={settings.chat.temperature}
+            onChange={(_, v) => updateChat({ temperature: v as number })}
+            min={0}
+            max={2}
+            step={0.1}
+            valueLabelDisplay="auto"
           />
         </Box>
       </Paper>

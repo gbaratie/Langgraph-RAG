@@ -25,6 +25,13 @@ _DEFAULT_SETTINGS = {
         "enable_remote_services": False,
         "artifacts_path": None,
     },
+    "retriever": {
+        "k": 5,
+    },
+    "chat": {
+        "model": "gpt-4o-mini",
+        "temperature": 0,
+    },
 }
 
 
