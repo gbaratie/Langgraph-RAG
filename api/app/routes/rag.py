@@ -2,7 +2,12 @@
 from fastapi import APIRouter, File, UploadFile, HTTPException
 from pydantic import BaseModel
 
-from app.services.docling_ingest import ingest_document
+from app.services.docling_ingest import (
+    ingest_document,
+    list_documents,
+    get_chunks_by_document_id,
+    delete_document,
+)
 from app.services.rag_graph import query_rag
 
 router = APIRouter()
@@ -24,10 +29,33 @@ async def ingest(file: UploadFile = File(...)):
         raise HTTPException(400, "Nom de fichier manquant")
     content = await file.read()
     try:
-        chunks = await ingest_document(content, filename=file.filename)
-        return {"filename": file.filename, "chunks": len(chunks)}
+        doc_id, chunks = await ingest_document(content, filename=file.filename)
+        return {"id": doc_id, "filename": file.filename, "chunks": len(chunks)}
     except Exception as e:
         raise HTTPException(422, f"Erreur d'ingestion: {e!s}") from e
+
+
+@router.get("/documents")
+async def documents_list():
+    """Liste les documents ingérés (id, filename, chunk_count)."""
+    return list_documents()
+
+
+@router.get("/documents/{doc_id}/chunks")
+async def documents_chunks(doc_id: str):
+    """Retourne les chunks d'un document."""
+    chunks = get_chunks_by_document_id(doc_id)
+    if chunks is None:
+        raise HTTPException(404, "Document non trouvé")
+    return {"id": doc_id, "chunks": chunks}
+
+
+@router.delete("/documents/{doc_id}")
+async def documents_delete(doc_id: str):
+    """Supprime un document et ses chunks."""
+    if not delete_document(doc_id):
+        raise HTTPException(404, "Document non trouvé")
+    return {"ok": True}
 
 
 @router.post("/query", response_model=QueryResponse)
