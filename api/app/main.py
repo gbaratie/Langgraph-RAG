@@ -3,6 +3,14 @@ Point d'entrée FastAPI pour l'API Langgraph-RAG.
 CORS configuré pour le frontend (localhost + GitHub Pages).
 """
 import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Charger api/.env (fonctionne que uvicorn soit lancé depuis api/ ou la racine du projet)
+_env_path = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(_env_path)
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
