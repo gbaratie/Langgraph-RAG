@@ -1,0 +1,14 @@
+# Blueprint Render pour l'API Langgraph-RAG
+# https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: langgraph-rag-api
+    runtime: python
+    rootDir: api
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GITHUB_PAGES_ORIGIN
+        sync: false
