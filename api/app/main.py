@@ -14,7 +14,7 @@ load_dotenv(_env_path)
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routes import health, rag
+from app.routes import health, rag, settings
 
 app = FastAPI(
     title="Langgraph-RAG API",
@@ -38,6 +38,7 @@ app.add_middleware(
 
 app.include_router(health.router, tags=["health"])
 app.include_router(rag.router, prefix="/api/rag", tags=["rag"])
+app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
 
 
 @app.get("/")

@@ -3,6 +3,7 @@ from fastapi import APIRouter, File, UploadFile, HTTPException
 from pydantic import BaseModel
 
 from app.services.docling_ingest import (
+    ingest_document_with_id,
     ingest_document,
     list_documents,
     get_chunks_by_document_id,
@@ -56,6 +57,21 @@ async def documents_delete(doc_id: str):
     if not delete_document(doc_id):
         raise HTTPException(404, "Document non trouvé")
     return {"ok": True}
+
+
+@router.post("/documents/{doc_id}/reingest", status_code=200)
+async def documents_reingest(doc_id: str, file: UploadFile = File(...)):
+    """Ré-ingère un document avec les paramètres actuels (remplace l'existant)."""
+    if not file.filename:
+        raise HTTPException(400, "Nom de fichier manquant")
+    if get_chunks_by_document_id(doc_id) is None:
+        raise HTTPException(404, "Document non trouvé")
+    content = await file.read()
+    try:
+        _, chunks = await ingest_document_with_id(content, file.filename, doc_id)
+        return {"id": doc_id, "filename": file.filename, "chunks": len(chunks)}
+    except Exception as e:
+        raise HTTPException(422, f"Erreur de ré-ingestion: {e!s}") from e
 
 
 @router.post("/query", response_model=QueryResponse)

@@ -10,12 +10,14 @@ import ListItemSecondaryAction from '@mui/material/ListItemSecondaryAction';
 import IconButton from '@mui/material/IconButton';
 import DeleteIcon from '@mui/icons-material/Delete';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import CircularProgress from '@mui/material/CircularProgress';
 import Paper from '@mui/material/Paper';
 import {
   ingestFile,
   listDocuments,
   deleteDocument,
+  reingestDocument,
   type DocumentItem,
 } from '@/lib/api';
 
@@ -24,6 +26,7 @@ export default function ImportPage() {
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importingName, setImportingName] = useState<string | null>(null);
+  const [reingestingId, setReingestingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -76,6 +79,29 @@ export default function ImportPage() {
     }
   };
 
+  const handleReingest = (doc: DocumentItem) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.pdf,.txt';
+    input.onchange = async (e: Event) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      setError(null);
+      setSuccess(null);
+      setReingestingId(doc.id);
+      try {
+        const res = await reingestDocument(doc.id, file);
+        setSuccess(`"${res.filename}" ré-importé : ${res.chunks} chunk(s).`);
+        await fetchDocuments();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Erreur lors du ré-import');
+      } finally {
+        setReingestingId(null);
+      }
+    };
+    input.click();
+  };
+
   return (
     <Box>
       <Typography variant="h4" gutterBottom>
@@ -125,7 +151,20 @@ export default function ImportPage() {
                   primary={doc.filename}
                   secondary={`${doc.chunk_count} chunk(s)`}
                 />
-                <ListItemSecondaryAction>
+                <ListItemSecondaryAction sx={{ display: 'flex', gap: 0 }}>
+                  <IconButton
+                    edge="end"
+                    aria-label="Ré-importer"
+                    onClick={() => handleReingest(doc)}
+                    disabled={reingestingId !== null}
+                    title="Ré-importer avec les paramètres actuels"
+                  >
+                    {reingestingId === doc.id ? (
+                      <CircularProgress size={24} />
+                    ) : (
+                      <RefreshIcon />
+                    )}
+                  </IconButton>
                   <IconButton
                     edge="end"
                     aria-label="Supprimer"

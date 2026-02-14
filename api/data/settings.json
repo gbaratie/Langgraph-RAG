@@ -1,0 +1,21 @@
+{
+  "chunks": {
+    "chunk_size": 1000,
+    "chunk_overlap": 100,
+    "separators": [
+      "\n\n",
+      "\n",
+      " ",
+      ""
+    ]
+  },
+  "docling": {
+    "max_num_pages": null,
+    "max_file_size": null,
+    "do_table_structure": false,
+    "do_cell_matching": true,
+    "table_former_mode": "FAST",
+    "enable_remote_services": false,
+    "artifacts_path": null
+  }
+}
