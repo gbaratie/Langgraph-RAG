@@ -8,4 +8,5 @@ export const navItems: { label: string; path: string }[] = [
   { label: 'Import', path: '/import' },
   { label: 'Chunks', path: '/chunks' },
   { label: 'Chat', path: '/chat' },
+  { label: 'Paramètres', path: '/settings' },
 ];

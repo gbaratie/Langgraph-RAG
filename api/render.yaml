@@ -7,8 +7,15 @@ services:
     rootDir: api
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    # Disque persistant pour Chroma (vecteurs + chunks) ; définir CHROMA_PERSIST_DIR=/data/chroma
+    disk:
+      name: chroma-data
+      mountPath: /data
+      sizeGB: 1
     envVars:
       - key: OPENAI_API_KEY
         sync: false
+      - key: CHROMA_PERSIST_DIR
+        value: /data/chroma
       - key: GITHUB_PAGES_ORIGIN
         sync: false
