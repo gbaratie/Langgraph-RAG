@@ -12,7 +12,18 @@ import ListItem from '@mui/material/ListItem';
 import ListItemText from '@mui/material/ListItemText';
 import CircularProgress from '@mui/material/CircularProgress';
 import Chip from '@mui/material/Chip';
-import { listDocuments, getDocumentChunks, type DocumentItem } from '@/lib/api';
+import {
+  ScatterChart,
+  Scatter,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ResponsiveContainer,
+  Cell,
+} from 'recharts';
+import { listDocuments, getDocumentChunks, getVectorMap, type DocumentItem, type VectorMapPoint } from '@/lib/api';
+
+const VECTOR_MAP_COLORS = ['#1976d2', '#2e7d32', '#ed6c02', '#9c27b0', '#0288d1', '#c62828', '#558b2f', '#6a1b9a'];
 
 export default function ChunksPage() {
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
@@ -21,6 +32,9 @@ export default function ChunksPage() {
   const [loadingDocs, setLoadingDocs] = useState(true);
   const [loadingChunks, setLoadingChunks] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [vectorMapLoading, setVectorMapLoading] = useState(true);
+  const [vectorMapAvailable, setVectorMapAvailable] = useState(false);
+  const [vectorMapPoints, setVectorMapPoints] = useState<VectorMapPoint[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -35,6 +49,28 @@ export default function ChunksPage() {
         if (!cancelled) setLoadingDocs(false);
       }
     })();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    setVectorMapLoading(true);
+    getVectorMap()
+      .then((res) => {
+        if (!cancelled) {
+          setVectorMapAvailable(res.available);
+          setVectorMapPoints(res.points);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setVectorMapAvailable(false);
+          setVectorMapPoints([]);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setVectorMapLoading(false);
+      });
     return () => { cancelled = true; };
   }, []);
 
@@ -60,9 +96,67 @@ export default function ChunksPage() {
   }, [selectedId]);
 
   const selectedDoc = documents.find((d) => d.id === selectedId);
+  const docIdToColor = (() => {
+    const m = new Map<string, string>();
+    let i = 0;
+    vectorMapPoints.forEach((p) => {
+      if (!m.has(p.doc_id)) m.set(p.doc_id, VECTOR_MAP_COLORS[i++ % VECTOR_MAP_COLORS.length]);
+    });
+    return m;
+  })();
 
   return (
     <Box>
+      {/* Carte des vecteurs (au-dessus du contenu chunks) */}
+      <Paper variant="outlined" sx={{ p: 2, mb: 3 }}>
+        <Typography variant="h6" gutterBottom>
+          Carte des vecteurs
+        </Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          Projection 2D (t-SNE) des embeddings des chunks. Les points proches sont sémantiquement similaires.
+        </Typography>
+        {vectorMapLoading ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', py: 4 }}>
+            <CircularProgress />
+          </Box>
+        ) : !vectorMapAvailable || vectorMapPoints.length === 0 ? (
+          <Alert severity="info">
+            Activer Chroma (OPENAI_API_KEY) et importer des documents pour afficher la carte des vecteurs.
+          </Alert>
+        ) : (
+          <Box sx={{ width: '100%', height: 400 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <ScatterChart margin={{ top: 16, right: 16, bottom: 16, left: 16 }}>
+                <XAxis dataKey="x" name="x" type="number" tick={{ fontSize: 11 }} />
+                <YAxis dataKey="y" name="y" type="number" tick={{ fontSize: 11 }} />
+                <Tooltip
+                  cursor={{ strokeDasharray: '3 3' }}
+                  content={({ active, payload }) => {
+                    if (!active || !payload?.length) return null;
+                    const p = payload[0].payload as VectorMapPoint;
+                    return (
+                      <Paper sx={{ p: 1.5, maxWidth: 360 }}>
+                        <Typography variant="caption" color="text.secondary">
+                          {p.filename} — chunk #{p.chunk_index + 1}
+                        </Typography>
+                        <Typography variant="body2" sx={{ mt: 0.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                          {p.text_snippet || '(vide)'}
+                        </Typography>
+                      </Paper>
+                    );
+                  }}
+                />
+                <Scatter data={vectorMapPoints} name="chunks">
+                  {vectorMapPoints.map((_, i) => (
+                    <Cell key={i} fill={docIdToColor.get(vectorMapPoints[i].doc_id) ?? '#888'} />
+                  ))}
+                </Scatter>
+              </ScatterChart>
+            </ResponsiveContainer>
+          </Box>
+        )}
+      </Paper>
+
       <Typography variant="h4" gutterBottom>
         Visualisation des chunks
       </Typography>

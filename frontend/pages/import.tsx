@@ -10,12 +10,14 @@ import ListItemSecondaryAction from '@mui/material/ListItemSecondaryAction';
 import IconButton from '@mui/material/IconButton';
 import DeleteIcon from '@mui/icons-material/Delete';
 import CloudUploadIcon from '@mui/icons-material/CloudUpload';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import CircularProgress from '@mui/material/CircularProgress';
 import Paper from '@mui/material/Paper';
 import {
-  ingestFile,
+  ingestFileWithProgress,
   listDocuments,
   deleteDocument,
+  reingestDocument,
   type DocumentItem,
 } from '@/lib/api';
 
@@ -24,8 +26,11 @@ export default function ImportPage() {
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importingName, setImportingName] = useState<string | null>(null);
+  const [reingestingId, setReingestingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [importStep, setImportStep] = useState<string | null>(null);
+  const [importMessage, setImportMessage] = useState<string>('');
 
   const fetchDocuments = useCallback(async () => {
     setLoading(true);
@@ -44,6 +49,15 @@ export default function ImportPage() {
     fetchDocuments();
   }, [fetchDocuments]);
 
+  const stepLabels: Record<string, string> = {
+    convert: 'Conversion du document',
+    split: 'Découpage en chunks',
+    split_done: 'Découpage terminé',
+    store: 'Enregistrement des vecteurs',
+    done: 'Terminé',
+    error: 'Erreur',
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -51,15 +65,27 @@ export default function ImportPage() {
     setSuccess(null);
     setImporting(true);
     setImportingName(file.name);
+    setImportStep(null);
+    setImportMessage('');
     try {
-      const res = await ingestFile(file);
+      const res = await ingestFileWithProgress(file, (event) => {
+        setImportStep(event.step);
+        setImportMessage(event.message || '');
+      });
       setSuccess(`"${res.filename}" importé : ${res.chunks} chunk(s).`);
+      setImportStep('done');
+      setImportMessage('');
       await fetchDocuments();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Erreur lors de l'import");
+      setImportStep('error');
     } finally {
       setImporting(false);
       setImportingName(null);
+      setTimeout(() => {
+        setImportStep(null);
+        setImportMessage('');
+      }, 2000);
       e.target.value = '';
     }
   };
@@ -74,6 +100,29 @@ export default function ImportPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur lors de la suppression');
     }
+  };
+
+  const handleReingest = (doc: DocumentItem) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.pdf,.txt';
+    input.onchange = async (e: Event) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+      setError(null);
+      setSuccess(null);
+      setReingestingId(doc.id);
+      try {
+        const res = await reingestDocument(doc.id, file);
+        setSuccess(`"${res.filename}" ré-importé : ${res.chunks} chunk(s).`);
+        await fetchDocuments();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Erreur lors du ré-import');
+      } finally {
+        setReingestingId(null);
+      }
+    };
+    input.click();
   };
 
   return (
@@ -95,10 +144,17 @@ export default function ImportPage() {
           {importing ? `Import en cours… (${importingName})` : 'Choisir un fichier'}
           <input type="file" hidden accept=".pdf,.txt" onChange={handleFileUpload} />
         </Button>
-        {importing && (
-          <Typography variant="body2" color="text.secondary">
-            Traitement de {importingName}…
-          </Typography>
+        {importing && importStep && (
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+            <Typography variant="body2" color="text.secondary">
+              {importingName} — {stepLabels[importStep] ?? importStep}
+            </Typography>
+            {importMessage && (
+              <Typography variant="caption" color="text.secondary">
+                {importMessage}
+              </Typography>
+            )}
+          </Box>
         )}
       </Box>
 
@@ -125,7 +181,20 @@ export default function ImportPage() {
                   primary={doc.filename}
                   secondary={`${doc.chunk_count} chunk(s)`}
                 />
-                <ListItemSecondaryAction>
+                <ListItemSecondaryAction sx={{ display: 'flex', gap: 0 }}>
+                  <IconButton
+                    edge="end"
+                    aria-label="Ré-importer"
+                    onClick={() => handleReingest(doc)}
+                    disabled={reingestingId !== null}
+                    title="Ré-importer avec les paramètres actuels"
+                  >
+                    {reingestingId === doc.id ? (
+                      <CircularProgress size={24} />
+                    ) : (
+                      <RefreshIcon />
+                    )}
+                  </IconButton>
                   <IconButton
                     edge="end"
                     aria-label="Supprimer"

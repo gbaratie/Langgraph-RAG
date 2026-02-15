@@ -1,25 +1,42 @@
 # Langgraph-RAG
 
-Projet RAG (Retrieval-Augmented Generation) avec **Langgraph**, **Docling**, **FastAPI** et un frontend **Next.js + MUI**. Déploiement : API sur **Render**, frontend sur **GitHub Pages**.
+Projet **RAG (Retrieval-Augmented Generation)** avec **LangGraph**, **Docling**, **Chroma**, **FastAPI** et un frontend **Next.js + MUI**. Déploiement : API sur **Render**, frontend sur **GitHub Pages**.
+
+## Fonctionnalités
+
+- **Import de documents** : PDF et texte, conversion via Docling, découpage en chunks (paramètres configurables), vectorisation (OpenAI) et stockage Chroma. Import avec **statuts en temps réel** (SSE : conversion, découpage, enregistrement).
+- **Chat RAG** : question → récupération des chunks pertinents (similarité sémantique ou fallback mots-clés) → génération de la réponse par le LLM. Affichage des chunks utilisés, scores et méthode de récupération (dépliable).
+- **Chunks** : liste des documents et de leurs chunks, **carte 2D des vecteurs** (t-SNE) pour visualiser l’espace d’embeddings.
+- **Paramètres** : découpage (taille, chevauchement, séparateurs), options Docling (pages max, tableaux, TableFormer), **retriever** (nombre k de chunks), **chat** (modèle OpenAI, température). Stockage dans `api/data/settings.json`.
 
 ## Structure
 
 ```
-├── api/                 # FastAPI (Langgraph + Docling)
+├── api/                        # FastAPI
 │   ├── app/
-│   │   ├── main.py      # Point d'entrée, CORS
-│   │   ├── routes/      # health, rag (ingest, query)
-│   │   └── services/    # docling_ingest, rag_graph
+│   │   ├── main.py             # Point d'entrée, CORS
+│   │   ├── routes/
+│   │   │   ├── health.py
+│   │   │   ├── rag.py          # ingest, ingest-stream, query, documents, vector-map
+│   │   │   └── settings.py     # GET/PUT paramètres
+│   │   └── services/
+│   │       ├── docling_ingest.py   # Docling + chunks + vector_store
+│   │       ├── rag_graph.py        # LangGraph retrieval → generate
+│   │       ├── settings_service.py # Lecture/écriture settings.json
+│   │       └── vector_store.py     # Chroma + embeddings
+│   ├── data/
+│   │   ├── settings.json       # Paramètres (chunks, docling, retriever, chat)
+│   │   └── chroma/             # Base vecteurs (persistante)
 │   ├── requirements.txt
 │   └── .env.example
-├── frontend/            # Next.js 14 + React 18 + MUI
-│   ├── components/
-│   ├── config/
-│   ├── lib/
-│   ├── pages/
+├── frontend/                   # Next.js 14 + React 18 + MUI
+│   ├── components/             # Layout, navigation
+│   ├── config/                 # site (nom, nav)
+│   ├── lib/                    # api.ts (appels API)
+│   ├── pages/                  # index, import, chunks, chat, settings
 │   ├── theme/
 │   └── package.json
-└── .github/workflows/   # Déploiement frontend (GitHub Pages)
+└── .github/workflows/          # Déploiement frontend (GitHub Pages)
 ```
 
 ## Démarrage en local
@@ -31,7 +48,7 @@ cd api
 python -m venv .venv
 source .venv/bin/activate   # ou .venv\Scripts\activate sur Windows
 pip install -r requirements.txt
-cp .env.example .env       # optionnel : OPENAI_API_KEY, CORS
+cp .env.example .env        # optionnel : OPENAI_API_KEY, CORS
 uvicorn app.main:app --reload --port 8000
 ```
 
@@ -43,7 +60,7 @@ uvicorn app.main:app --reload --port 8000
 ```bash
 cd frontend
 npm install
-cp .env.example .env       # optionnel : NEXT_PUBLIC_API_URL=http://localhost:8000
+cp .env.example .env        # optionnel : NEXT_PUBLIC_API_URL=http://localhost:8000
 npm run dev
 ```
 
@@ -51,13 +68,22 @@ npm run dev
 
 Le frontend appelle l’API via `NEXT_PUBLIC_API_URL` (défaut : `http://localhost:8000`).
 
+## Stockage des vecteurs (embeddings)
+
+Les chunks sont vectorisés à l’import (OpenAI `text-embedding-3-small`) et stockés dans **Chroma** pour la recherche sémantique au chat.
+
+- **En local** : répertoire par défaut `./data/chroma` (créé automatiquement). Optionnel : `CHROMA_PERSIST_DIR=./data/chroma` dans `api/.env`.
+- **Sur Render** : un disque persistant est monté en `/data` dans le blueprint ; `CHROMA_PERSIST_DIR=/data/chroma` conserve les données entre déploiements. Voir [Render Disks](https://render.com/docs/disks).
+- **Sans clé OpenAI** : pas d’embeddings ; les documents restent en mémoire et la recherche utilise un fallback par mots-clés.
+
 ## Variables d’environnement
 
 ### API (`api/.env`)
 
 | Variable | Description |
 |----------|-------------|
-| `OPENAI_API_KEY` | Clé OpenAI pour le LLM du RAG (optionnel) |
+| `OPENAI_API_KEY` | Clé OpenAI pour le LLM et les embeddings du RAG (optionnel) |
+| `CHROMA_PERSIST_DIR` | Répertoire de persistance Chroma (défaut : `./data/chroma` ; Render : `/data/chroma`) |
 | `CORS_ORIGINS` | Origines CORS (défaut : localhost:3000) |
 | `GITHUB_PAGES_ORIGIN` | Origine du site GitHub Pages en prod |
 
@@ -77,7 +103,8 @@ Le frontend appelle l’API via `NEXT_PUBLIC_API_URL` (défaut : `http://localho
 2. **Root Directory** : `api`.
 3. **Build** : `pip install -r requirements.txt`
 4. **Start** : `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-5. Ajouter les variables d’environnement (ex. `OPENAI_API_KEY`, `GITHUB_PAGES_ORIGIN`).
+5. Pour conserver les documents et vecteurs entre déploiements : ajouter un **Persistent Disk** (ex. monté en `/data`) et définir `CHROMA_PERSIST_DIR=/data/chroma`. Le `render.yaml` du dépôt inclut déjà cette configuration.
+6. Variables d’environnement : `OPENAI_API_KEY`, `GITHUB_PAGES_ORIGIN` (et `CHROMA_PERSIST_DIR` si disque personnalisé).
 
 ### Frontend sur GitHub Pages
 
