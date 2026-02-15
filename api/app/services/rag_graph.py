@@ -1,26 +1,26 @@
 """
-Graphe RAG minimal avec Langgraph : retrieval + génération.
-Utilise les chunks ingérés (mémoire) et un LLM optionnel (OpenAI si clé fournie).
+Graphe RAG minimal : retrieval + génération.
+Un seul chemin d'exécution (_retrieve puis _generate), avec ou sans Langgraph.
+Utilise document_store et un LLM optionnel (OpenAI si clé fournie).
 """
 import os
 from typing import Any
 
-from app.services.docling_ingest import get_ingested_chunks
+from app.services.document_store import get_all_chunks
 from app.services.settings_service import get_settings
 from app.services import vector_store
 
 # Langchain/Langgraph optionnels pour éviter erreurs si pas de clé API
 try:
-    from langgraph.graph import StateGraph, END
     from langchain_core.messages import HumanMessage, SystemMessage
     from langchain_openai import ChatOpenAI
-    _HAS_LANGGRAPH = True
+    _HAS_LLM = True
 except ImportError:
-    _HAS_LANGGRAPH = False
+    _HAS_LLM = False
 
 
 def _get_llm():
-    if not _HAS_LANGGRAPH:
+    if not _HAS_LLM:
         return None
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -44,7 +44,7 @@ def _retrieve(state: dict) -> dict:
         state["retrieval_method"] = "similarity"
         state["context"] = "\n\n".join(c["text"] for c in with_scores) if with_scores else ""
     else:
-        chunks = get_ingested_chunks()
+        chunks = get_all_chunks()
         if question and chunks:
             q_lower = question.lower()
             relevant = [c for c in chunks if any(w in c.lower() for w in q_lower.split() if len(w) > 2)]
@@ -71,32 +71,24 @@ def _generate(state: dict) -> dict:
         response = llm.invoke(messages)
         state["answer"] = response.content if hasattr(response, "content") else str(response)
     else:
-        if not get_ingested_chunks():
+        all_chunks = get_all_chunks()
+        if not all_chunks:
             state["answer"] = "Aucun document ingéré. Uploadez un PDF ou un fichier texte via /api/rag/ingest."
         else:
-            state["answer"] = f"Contexte disponible ({len(get_ingested_chunks())} chunks). Configurez OPENAI_API_KEY pour des réponses générées."
+            state["answer"] = f"Contexte disponible ({len(all_chunks)} chunks). Configurez OPENAI_API_KEY pour des réponses générées."
     state["sources"] = state.get("context", "").split("\n\n")[:3] if state.get("context") else []
-    # retrieved_chunks et retrieval_method déjà remplis par _retrieve
     return state
 
 
-def _build_graph():
-    if not _HAS_LANGGRAPH:
-        return None
-    workflow = StateGraph(dict)
-    workflow.add_node("retrieve", _retrieve)
-    workflow.add_node("generate", _generate)
-    workflow.set_entry_point("retrieve")
-    workflow.add_edge("retrieve", "generate")
-    workflow.add_edge("generate", END)
-    return workflow.compile()
-
-
-_rag_graph = _build_graph() if _HAS_LANGGRAPH else None
+def _run_rag_pipeline(state: dict) -> dict:
+    """Exécute retrieve puis generate. Chemin unique pour avec/sans Langgraph."""
+    state = _retrieve(state)
+    state = _generate(state)
+    return state
 
 
 async def query_rag(question: str) -> dict[str, Any]:
-    """Exécute le graphe RAG et retourne answer, sources, retrieved_chunks, retrieval_method."""
+    """Exécute le pipeline RAG et retourne answer, sources, retrieved_chunks, retrieval_method."""
     state = {
         "question": question,
         "context": "",
@@ -105,16 +97,7 @@ async def query_rag(question: str) -> dict[str, Any]:
         "retrieved_chunks": [],
         "retrieval_method": "keyword",
     }
-    if _rag_graph:
-        result = _rag_graph.invoke(state)
-        return {
-            "answer": result.get("answer", ""),
-            "sources": result.get("sources", []),
-            "retrieved_chunks": result.get("retrieved_chunks", []),
-            "retrieval_method": result.get("retrieval_method", "keyword"),
-        }
-    _retrieve(state)
-    _generate(state)
+    state = _run_rag_pipeline(state)
     return {
         "answer": state.get("answer", ""),
         "sources": state.get("sources", []),

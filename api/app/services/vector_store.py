@@ -15,6 +15,16 @@ try:
 except ImportError:
     _HAS_CHROMA = False
 
+# t-SNE pour la carte 2D des vecteurs (import en tête pour éviter latence au premier appel)
+try:
+    import numpy as np
+    from sklearn.manifold import TSNE
+    _HAS_TSNE = True
+except ImportError:
+    np = None  # type: ignore
+    TSNE = None  # type: ignore
+    _HAS_TSNE = False
+
 _COLLECTION_NAME = "rag_chunks"
 # Chemin absolu par défaut (relatif au package api) pour éviter les écarts de cwd
 _BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -30,10 +40,21 @@ def _get_persist_directory() -> str:
 
 
 def _coll_get(data: Any, key: str, default: Any = None) -> Any:
-    """Lit un champ du résultat Chroma (dict ou objet avec attributs)."""
+    """
+    Lit un champ du résultat Chroma (dict ou objet avec attributs).
+    L'API Chroma peut renvoyer des dict ou des objets selon les versions / contextes.
+    """
     if hasattr(data, "get") and callable(getattr(data, "get")):
         return data.get(key, default)
     return getattr(data, key, default)
+
+
+def _get_collection(store: Any) -> Any:
+    """
+    Accès à la collection Chroma (API interne langchain-chroma).
+    Centralisé pour faciliter une future migration si l'API change.
+    """
+    return store._collection
 
 
 def _get_embedding_function():
@@ -129,7 +150,7 @@ def delete_by_doc_id(doc_id: str) -> bool:
     if store is None:
         return False
     try:
-        collection = store._collection
+        collection = _get_collection(store)
         collection.delete(where={"doc_id": doc_id})
         return True
     except Exception:
@@ -145,7 +166,7 @@ def list_document_ids() -> List[tuple]:
     if store is None:
         return []
     try:
-        collection = store._collection
+        collection = _get_collection(store)
         data = collection.get(include=["metadatas"])
         metadatas = _coll_get(data, "metadatas") or []
         seen: set = set()
@@ -169,7 +190,7 @@ def get_chunk_count_by_doc_id(doc_id: str) -> int:
     if store is None:
         return 0
     try:
-        collection = store._collection
+        collection = _get_collection(store)
         data = collection.get(where={"doc_id": doc_id}, include=[])
         ids = _coll_get(data, "ids") or []
         return len(ids)
@@ -186,7 +207,7 @@ def get_chunks_by_doc_id(doc_id: str) -> Optional[List[str]]:
     if store is None:
         return None
     try:
-        collection = store._collection
+        collection = _get_collection(store)
         data = collection.get(
             where={"doc_id": doc_id},
             include=["documents", "metadatas"],
@@ -207,6 +228,11 @@ def get_chunks_by_doc_id(doc_id: str) -> Optional[List[str]]:
         return None
 
 
+def _to_list(v: Any) -> Any:
+    """Éviter 'x or []' avec des numpy arrays (ValueError: truth value ambiguous)."""
+    return [] if v is None else v
+
+
 def get_vector_map_points(snippet_max_len: int = 150) -> List[dict[str, Any]]:
     """
     Retourne les points pour la carte 2D des vecteurs (t-SNE sur les embeddings).
@@ -214,23 +240,19 @@ def get_vector_map_points(snippet_max_len: int = 150) -> List[dict[str, Any]]:
     Liste vide si store indisponible ou collection vide.
     """
     store = _get_vector_store()
-    if store is None:
+    if store is None or not _HAS_TSNE or np is None or TSNE is None:
         return []
     try:
-        from sklearn.manifold import TSNE
-        import numpy as np
-
-        collection = store._collection
-        # include n'accepte pas "ids" en Chroma 1.5+ ; on se base sur len(embeddings)
+        collection = _get_collection(store)
         data = collection.get(
             include=["embeddings", "documents", "metadatas"],
         )
-        ids_raw = _coll_get(data, "ids") or []
-        embeddings = _coll_get(data, "embeddings") or []
-        documents = _coll_get(data, "documents") or []
-        metadatas = _coll_get(data, "metadatas") or []
+        ids_raw = _to_list(_coll_get(data, "ids"))
+        embeddings = _to_list(_coll_get(data, "embeddings"))
+        documents = _to_list(_coll_get(data, "documents"))
+        metadatas = _to_list(_coll_get(data, "metadatas"))
 
-        if not embeddings:
+        if len(embeddings) == 0:
             _log.debug("get_vector_map_points: no embeddings")
             return []
 
@@ -243,7 +265,10 @@ def get_vector_map_points(snippet_max_len: int = 150) -> List[dict[str, Any]]:
         ids_list = [base_ids[i] if i < len(base_ids) else f"chunk_{i}" for i in range(n)]
 
         X = np.array(embeddings, dtype=np.float64)
-        tsne = TSNE(n_components=2, random_state=42)
+        # perplexity doit être < n_samples (défaut 30)
+        n_samples = X.shape[0]
+        perplexity = min(30, max(1, n_samples - 1))
+        tsne = TSNE(n_components=2, random_state=42, perplexity=perplexity)
         coords = tsne.fit_transform(X)
 
         points: List[dict[str, Any]] = []

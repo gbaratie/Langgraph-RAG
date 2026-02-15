@@ -1,38 +1,16 @@
 """
 Service de gestion des paramètres (chunks, Docling).
-Stockage dans data/settings.json.
+Stockage dans data/settings.json. Validation via schéma Pydantic.
 """
 import json
 from pathlib import Path
 from typing import Any
 
+from app.schemas.settings import AppSettings
+
 # Chemin relatif au dossier api/
 _SETTINGS_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 _SETTINGS_FILE = _SETTINGS_DIR / "settings.json"
-
-_DEFAULT_SETTINGS = {
-    "chunks": {
-        "chunk_size": 1000,
-        "chunk_overlap": 200,
-        "separators": ["\n\n", "\n", " ", ""],
-    },
-    "docling": {
-        "max_num_pages": None,
-        "max_file_size": None,
-        "do_table_structure": True,
-        "do_cell_matching": True,
-        "table_former_mode": "ACCURATE",
-        "enable_remote_services": False,
-        "artifacts_path": None,
-    },
-    "retriever": {
-        "k": 5,
-    },
-    "chat": {
-        "model": "gpt-4o-mini",
-        "temperature": 0,
-    },
-}
 
 
 def _ensure_dir() -> None:
@@ -40,40 +18,48 @@ def _ensure_dir() -> None:
 
 
 def get_settings() -> dict[str, Any]:
-    """Charge les paramètres depuis le fichier, ou retourne les valeurs par défaut."""
+    """Charge les paramètres depuis le fichier, ou retourne les valeurs par défaut (validées)."""
     if not _SETTINGS_FILE.exists():
-        return _deep_copy(_DEFAULT_SETTINGS)
+        return AppSettings().model_dump()
     try:
         with open(_SETTINGS_FILE, encoding="utf-8") as f:
             loaded = json.load(f)
-        return _merge_defaults(loaded, _DEFAULT_SETTINGS)
-    except (json.JSONDecodeError, OSError):
-        return _deep_copy(_DEFAULT_SETTINGS)
+        # Valider et fusionner avec les défauts (Pydantic remplit les champs manquants)
+        settings = AppSettings.model_validate(loaded)
+        return settings.model_dump()
+    except (json.JSONDecodeError, OSError, ValueError):
+        return AppSettings().model_dump()
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Fusionne override dans base (récursif). Les clés absentes de override sont conservées."""
+    result = dict(base)
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
 
 
 def save_settings(settings: dict[str, Any]) -> dict[str, Any]:
-    """Sauvegarde les paramètres et retourne la config finale (fusionnée avec les défauts)."""
-    merged = _merge_defaults(settings, _DEFAULT_SETTINGS)
+    """
+    Valide les paramètres avec le schéma, sauvegarde uniquement les clés autorisées,
+    et retourne la config finale (fusionnée avec les défauts).
+    """
+    validated = AppSettings.model_validate(settings)
+    merged = validated.model_dump()
     _ensure_dir()
     with open(_SETTINGS_FILE, "w", encoding="utf-8") as f:
         json.dump(merged, f, indent=2, ensure_ascii=False)
     return merged
 
 
-def _deep_copy(obj: Any) -> Any:
-    if isinstance(obj, dict):
-        return {k: _deep_copy(v) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [_deep_copy(v) for v in obj]
-    return obj
-
-
-def _merge_defaults(loaded: dict, defaults: dict) -> dict:
-    """Fusionne les valeurs chargées avec les défauts (récursif)."""
-    result = _deep_copy(defaults)
-    for key, value in loaded.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-            result[key] = _merge_defaults(value, result[key])
-        elif key in result:
-            result[key] = value
-    return result
+def update_settings(partial: dict[str, Any]) -> dict[str, Any]:
+    """
+    Met à jour partiellement la config : fusionne partial avec la config actuelle,
+    valide le tout et sauvegarde. Idéal pour PUT avec un body partiel.
+    """
+    current = get_settings()
+    merged = _deep_merge(current, partial)
+    return save_settings(merged)

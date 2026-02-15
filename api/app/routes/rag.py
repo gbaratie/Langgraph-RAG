@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, File, UploadFile, HTTPException
@@ -20,6 +21,7 @@ from app.services.rag_graph import query_rag
 from app.services import vector_store
 
 router = APIRouter()
+_log = logging.getLogger(__name__)
 
 
 class QueryRequest(BaseModel):
@@ -48,7 +50,8 @@ async def ingest(file: UploadFile = File(...)):
         doc_id, chunks = await ingest_document(content, filename=file.filename)
         return {"id": doc_id, "filename": file.filename, "chunks": len(chunks)}
     except Exception as e:
-        raise HTTPException(422, f"Erreur d'ingestion: {e!s}") from e
+        _log.exception("Erreur d'ingestion: %s", e)
+        raise HTTPException(422, "Erreur d'ingestion du document") from e
 
 
 @router.post("/ingest-stream")
@@ -112,7 +115,8 @@ async def documents_reingest(doc_id: str, file: UploadFile = File(...)):
         _, chunks = await ingest_document_with_id(content, file.filename, doc_id)
         return {"id": doc_id, "filename": file.filename, "chunks": len(chunks)}
     except Exception as e:
-        raise HTTPException(422, f"Erreur de ré-ingestion: {e!s}") from e
+        _log.exception("Erreur de ré-ingestion: %s", e)
+        raise HTTPException(422, "Erreur de ré-ingestion du document") from e
 
 
 @router.post("/query", response_model=QueryResponse)
@@ -129,4 +133,5 @@ async def query(req: QueryRequest):
             retrieval_method=result.get("retrieval_method", "keyword"),
         )
     except Exception as e:
-        raise HTTPException(500, f"Erreur RAG: {e!s}") from e
+        _log.exception("Erreur RAG: %s", e)
+        raise HTTPException(500, "Erreur lors de la requête RAG") from e
