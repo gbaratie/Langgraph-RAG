@@ -20,3 +20,9 @@ services:
         value: /data/chroma
       - key: GITHUB_PAGES_ORIGIN
         sync: false
+      # Optionnel : exiger Origin/Referer (déjà activé si GITHUB_PAGES_ORIGIN est défini)
+      # - key: REQUIRE_ORIGIN_CHECK
+      #   value: "true"
+      # Optionnel : clé API à envoyer dans le header X-API-Key (front : NEXT_PUBLIC_API_KEY)
+      # - key: FRONTEND_API_KEY
+      #   sync: false
