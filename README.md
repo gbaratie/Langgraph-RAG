@@ -118,7 +118,7 @@ Les routes RAG chargent Docling/Chroma/LangGraph à la demande (imports paresseu
 
 - Python 3.10+
 - Node.js 18+ (recommandé : 20)
-- npm
+- npm 
 
 ## Licence
 
