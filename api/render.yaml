@@ -5,7 +5,8 @@ services:
     name: langgraph-rag-api
     runtime: python
     rootDir: api
-    buildCommand: pip install -r requirements.txt
+    # PyTorch CPU-only pour alléger le build et éviter CUDA sur des instances sans GPU
+    buildCommand: pip install --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     # Disque persistant pour Chroma (vecteurs + chunks) ; définir CHROMA_PERSIST_DIR=/data/chroma
     disk:

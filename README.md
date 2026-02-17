@@ -101,10 +101,12 @@ Les chunks sont vectorisés à l’import (OpenAI `text-embedding-3-small`) et s
 
 1. Créer un **Web Service** sur [Render](https://render.com), relié à ce dépôt.
 2. **Root Directory** : `api`.
-3. **Build** : `pip install -r requirements.txt`
+3. **Build** : le blueprint `api/render.yaml` utilise `pip install --extra-index-url https://download.pytorch.org/whl/cpu -r requirements.txt` pour PyTorch CPU-only (pas de CUDA). En manuel : `pip install -r requirements.txt`.
 4. **Start** : `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
 5. Pour conserver les documents et vecteurs entre déploiements : ajouter un **Persistent Disk** (ex. monté en `/data`) et définir `CHROMA_PERSIST_DIR=/data/chroma`. Le `render.yaml` du dépôt inclut déjà cette configuration.
 6. Variables d’environnement : `OPENAI_API_KEY`, `GITHUB_PAGES_ORIGIN` (et `CHROMA_PERSIST_DIR` si disque personnalisé).
+
+Les routes RAG chargent Docling/Chroma/LangGraph à la demande (imports paresseux), ce qui permet d'ouvrir le port rapidement et de répondre au health check sans attendre le chargement des lourdes dépendances.
 
 ### Frontend sur GitHub Pages
 
