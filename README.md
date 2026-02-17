@@ -86,6 +86,8 @@ Les chunks sont vectorisés à l’import (OpenAI `text-embedding-3-small`) et s
 | `CHROMA_PERSIST_DIR` | Répertoire de persistance Chroma (défaut : `./data/chroma` ; Render : `/data/chroma`) |
 | `CORS_ORIGINS` | Origines CORS (défaut : localhost:3000) |
 | `GITHUB_PAGES_ORIGIN` | Origine du site GitHub Pages en prod |
+| `REQUIRE_ORIGIN_CHECK` | Si `true`, rejette les requêtes sans Origin/Referer autorisé (bloque curl, Postman). Activé par défaut si `GITHUB_PAGES_ORIGIN` est défini. |
+| `FRONTEND_API_KEY` | Optionnel : clé que le front doit envoyer (header `X-API-Key`). Sur GitHub Pages la clé est visible dans le build ; utile pour rotation et rate limiting. |
 
 ### Frontend (`frontend/.env`)
 
@@ -94,6 +96,17 @@ Les chunks sont vectorisés à l’import (OpenAI `text-embedding-3-small`) et s
 | `NEXT_PUBLIC_API_URL` | URL de l’API (ex. URL Render en prod) |
 | `NEXT_PUBLIC_BASE_PATH` | Base path si sous-URL (ex. `/Langgraph-RAG`) |
 | `NEXT_PUBLIC_SITE_NAME` | Nom du site |
+| `NEXT_PUBLIC_API_KEY` | Optionnel : même valeur que `FRONTEND_API_KEY` côté API (envoi dans `X-API-Key`). |
+
+## Sécurité API (frontend uniquement)
+
+Par défaut, toute personne ayant l’URL de l’API Render peut l’appeler (curl, Postman, etc.). Pour limiter l’usage à ton front (GitHub Pages) :
+
+1. **CORS** (déjà en place) : le navigateur bloque les requêtes venant d’un autre domaine que ceux listés dans `CORS_ORIGINS` / `GITHUB_PAGES_ORIGIN`. Cela protège uniquement les appels depuis du JavaScript dans un autre site.
+2. **Vérification Origin/Referer** : dès que `GITHUB_PAGES_ORIGIN` est défini (ou si `REQUIRE_ORIGIN_CHECK=true`), l’API rejette les requêtes qui n’ont pas un en-tête `Origin` ou `Referer` autorisé. Les appels directs (curl, Postman, scripts) n’envoient en général pas ces en-têtes (ou les envoient vides) et reçoivent **403**. Un attaquant peut les forger, donc ce n’est pas une sécurité infaillible, mais cela empêche l’usage « sauvage » de l’URL.
+3. **Clé API (optionnel)** : en définissant `FRONTEND_API_KEY` côté API et `NEXT_PUBLIC_API_KEY` côté front, chaque requête doit envoyer cette clé dans le header `X-API-Key`. Sur GitHub Pages le front est statique : la clé est donc visible dans le code. Elle sert surtout à pouvoir **changer la clé** en cas d’abus (et à préparer du rate limiting par clé).
+
+**Pour une sécurité forte** (secret jamais exposé au client), il faudrait un **Backend For Frontend (BFF)** : le front n’appelle que ton BFF (ex. Vercel/Netlify serverless), et c’est le BFF qui appelle l’API Render avec une clé secrète. La clé ne quitte jamais le serveur.
 
 ## Déploiement
 
